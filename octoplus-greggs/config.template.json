@@ -1,0 +1,7 @@
+{
+  "octopusAPIKey": "YOUR_OCTOPUS_API_KEY",
+  "mailgunDomain": "YOUR_MAILGUN_DOMAIN",
+  "mailgunApiKey": "YOUR_MAILGUN_API_KEY",
+  "mailgunFrom": "YOUR_MAILGUN_FROM_EMAIL",
+  "mailgunTo": "YOUR_MAILGUN_TO_EMAIL"
+}
