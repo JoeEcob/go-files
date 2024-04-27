@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -33,7 +34,8 @@ func main() {
 	url := flag.String("url", "", "The URL to call to fetch RSS data including API key and search query.")
 	outputDir := flag.String("out", ".", "Path to output directory.")
 	fileExtension := flag.String("ext", "file", "File extension name to use.")
-	targetDate := flag.String("date", time.Now().Format(dateFormat), "Date to find results form e.g. '2006-01-02'.")
+	redirectFileExtension := flag.String("redir-ext", "redirect", "Redirect file extension name to use.")
+	targetDate := flag.String("date", time.Now().Format(dateFormat), "Date to find results from e.g. '2006-01-02'.")
 	dryRun := flag.Bool("dry-run", true, "Flag to set dry-run mode.")
 	verbose := flag.Bool("verbose", false, "Flag to set dry-run mode.")
 
@@ -59,6 +61,21 @@ func main() {
 
 	fmt.Printf("Found %d items, starting download...\n", len(r.Ch.Items))
 
+	// Create a custom client to catch redirects. Without this we get an "error supported protocol".
+	client := http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			loc, _ := req.Response.Location()
+
+			// If the scheme matches our wanted redir file ext, return an error to stop the follow.
+			if loc != nil && loc.Scheme == *redirectFileExtension {
+				return errors.New("caught redirect")
+			}
+
+			// Otherwise return nil, to follow the redirect
+			return nil
+		},
+	}
+
 	for _, item := range r.Ch.Items {
 		// e.g. "Thu, 11 Jan 2024 21:00:00 +0000"
 		t, e := time.Parse("Mon, 2 Jan 2006 15:04:05 +0000", item.PublishDate)
@@ -81,13 +98,24 @@ func main() {
 
 		fmt.Printf("Doing %s\n", item.Title)
 
-		itemRes, err := http.Get(item.Link)
+		itemRes, err := client.Get(item.Link)
+
+		// Handle redirects by saving the URL to a file
+		if err != nil && itemRes != nil && itemRes.StatusCode == http.StatusFound {
+			loc, _ := itemRes.Location()
+			fmt.Printf("Got 302. Writing %s\n", loc)
+			os.WriteFile(path.Join(*outputDir, fmt.Sprintf("%s.%s", item.Title, *redirectFileExtension)), []byte(loc.String()), 0666)
+			continue
+		}
+
+		// Every other error is unknown so exit
 		if err != nil {
 			fmt.Printf("Error fetching: %s err: %s\n", item.Title, err)
 			continue
 		}
 
-		if itemRes.StatusCode == 200 {
+		// Otherwise fetch the actual file
+		if itemRes.StatusCode == http.StatusOK {
 			fmt.Printf("Writing %s\n", item.Title)
 			bytes, _ := io.ReadAll(itemRes.Body)
 			os.WriteFile(path.Join(*outputDir, fmt.Sprintf("%s.%s", item.Title, *fileExtension)), bytes, 0666)
